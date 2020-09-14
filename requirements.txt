@@ -1,0 +1,3 @@
+selenium
+PyDictionary
+requests
