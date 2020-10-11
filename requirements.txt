@@ -4,3 +4,4 @@ requests
 cvlib
 opencv-python
 colorama
+tensorflow
