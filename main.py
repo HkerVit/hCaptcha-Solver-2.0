@@ -1,10 +1,16 @@
 from selenium.webdriver.chrome.options import Options
 from PyDictionary import PyDictionary
+from colorama import Fore, init
 from selenium import webdriver
-import threading
+import numpy as np
+import cvlib as cv
 import requests
 import json
 import time
+import cv2
+
+
+init(convert=True)
 
 HEADERS = {
     'authority': 'hcaptcha.com',
@@ -27,7 +33,6 @@ class hCaptcha(object):
         self.starttime = time.time()
 
     def get_n(self, req):
-        
         options = Options()
         options.headless = True
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
@@ -61,23 +66,25 @@ class hCaptcha(object):
     def is_correct(self, obj, url, taskkey):
         while True:
             try:
-                identifier = requests.post('https://www.imageidentify.com/objects/user-26a7681f-4b48-4f71-8f9f-93030898d70d/prd/urlapi', data={'image': url})
-                if obj == "motorbus": obj = "bus"
-                syns = PyDictionary().synonym(obj)
-                for syn in syns:
-                    if syn in json.dumps(identifier.json()['identify']):
-                        self.builder['answers'][taskkey] = 'true'
-                        return
-                
+                image = requests.get(url)
+                nparr = np.frombuffer(image.content, np.uint8)
+                im = cv2.imdecode(nparr, flags=1)
+                objects = cv.detect_common_objects(im, confidence=0.5, nms_thresh=1, enable_gpu=False)[1]
+                if obj.lower() in objects:
+                    print(f'{Fore.GREEN}[{Fore.WHITE}INFO{Fore.GREEN}] {Fore.CYAN}{taskkey}.jpg is a {obj}')
+                    self.builder['answers'][taskkey] = 'true'
+                    return
+                print(f'{Fore.GREEN}[{Fore.WHITE}INFO{Fore.GREEN}] {Fore.CYAN}{taskkey}.jpg is not a {obj}')
                 self.builder['answers'][taskkey] = 'false'
                 break
             except Exception as e:
-                print(identifier.text)
+                print(f"{Fore.RED}[{Fore.WHITE}ERROR{Fore.RED}] Unexpected error: {Fore.WHITE}{e}")
 
     def handle_images(self):
         payload = self.get_payload()
+        print(f"{Fore.GREEN}[{Fore.WHITE}INFO{Fore.GREEN}]{Fore.CYAN} Received payload")
         key = payload['key']
-        obj = payload['requester_question']['en'].split(' ')[-1]
+        obj = payload['requester_question']['en'].split(' ')[-1].replace("motorbus", "bus")
 
         self.builder['job_mode'] = 'image_label_binary'
         self.builder['answers'] = {}
@@ -86,16 +93,11 @@ class hCaptcha(object):
         self.builder['motionData'] = '{"st":' + str(int(round(time.time() * 1000))) +',"dct":' + str(int(round(time.time() * 1000))) +',"mm": []}'
         self.builder['n'] = self.get_n(self.c['req'])
         self.builder['c'] = json.dumps(self.c).replace("'", '"')
-
+        print(f'{Fore.GREEN}[{Fore.WHITE}INFO{Fore.GREEN}] {Fore.CYAN}{str(len(payload["tasklist"]))} images retrieved...')
         for task in payload['tasklist']:
             taskkey = task['task_key']
             url = task['datapoint_uri']
-            threading.Thread(target=self.is_correct, args=(obj, url, taskkey, )).start()
-        
-        while True:
-            if threading.active_count() == 1:
-                break
-            time.sleep(0.5)
+            self.is_correct(obj, url, taskkey)
         self.submit(key)
 
     def submit(self, key):
@@ -115,12 +117,14 @@ class hCaptcha(object):
             data=json.dumps(self.builder)
         )
 
-        if r.json()['pass'] == False:
-            self.handle_images()
-        else:
-            print(json.dumps(r.json(), indent=4))
+        if r.json()['pass']:
+            print(f"{Fore.GREEN}[{Fore.WHITE}PASSED{Fore.GREEN}] {Fore.CYAN}hCaptcha has been solved...")
+            print(f"{Fore.GREEN}[{Fore.WHITE}KEY{Fore.GREEN}] {Fore.CYAN}UUID:\n{Fore.LIGHTBLACK_EX}" + r.json()['generated_pass_UUID'])
             endtime = time.time()
-            print(endtime - self.starttime)
+            print(f"{Fore.GREEN}[{Fore.WHITE}INFO{Fore.GREEN}] {Fore.CYAN}Time taken: {str(round(endtime - self.starttime))}s")
+        else:
+            print(f"{Fore.RED}[{Fore.WHITE}FAIL{Fore.RED}] Retrying...")
+            self.handle_images()
 
 if __name__ == "__main__":
     Run = hCaptcha()
