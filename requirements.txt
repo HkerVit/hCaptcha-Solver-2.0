@@ -1,3 +1,6 @@
 selenium
 PyDictionary
 requests
+cvlib
+opencv-python
+colorama
